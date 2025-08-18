@@ -1,0 +1,222 @@
+#include "imports/stdlib.fc";
+#include "common/opcode.fc";
+#include "common/errors.fc";
+#include "common/constants.fc";
+#include "common/utils.fc";
+#include "bytecode/account_code.fc";
+#include "bytecode/arcade_machine_code.fc";
+
+;;;;;;;;;; Service Counter Storage ;;;;;;;;;;
+
+global slice service_counter::admin;
+global cell service_counter::base_code;
+global cell service_counter::wallet_code;
+global slice service_counter::coin_minter;
+global slice service_counter::ticket_minter;
+global slice service_counter::solver;
+
+() service_counter::load_data() impure inline_ref {
+    slice ds = get_data().begin_parse();
+    service_counter::admin = ds~load_msg_addr();
+    service_counter::base_code = ds~load_ref();
+    service_counter::wallet_code = ds~load_ref();
+    slice minters = ds~load_ref().begin_parse();
+    service_counter::coin_minter = minters~load_msg_addr();
+    service_counter::ticket_minter = minters~load_msg_addr();
+    minters.end_parse();
+    service_counter::solver = ds~load_msg_addr();
+    ds.end_parse();
+}
+
+() service_counter::save_data() impure inline_ref {
+    begin_cell()
+        .store_slice(service_counter::admin)
+        .store_ref(service_counter::base_code)
+        .store_ref(service_counter::wallet_code)
+        .store_ref(
+            begin_cell()
+                .store_slice(service_counter::coin_minter)
+                .store_slice(service_counter::ticket_minter)
+            .end_cell()
+        )
+        .store_slice(service_counter::solver)
+    .end_cell()
+    .set_data();
+}
+
+;;;;;;;;;; Service Counter Contract ;;;;;;;;;;
+
+int gas_consumption() asm "10000000 PUSHINT"; ;; 0.01 TON
+
+() recv_internal(int my_balance, int ctx::value, cell in_msg_full, slice ctx::body) impure {
+    slice s = in_msg_full.begin_parse();
+    int flags = s~load_msg_flags();
+
+    if (is_bounced(flags)) {
+        return ();
+    }
+
+    (slice ctx::sender, int ctx::fwd_fee) = s~retrieve_ctx(BASECHAIN);
+
+    service_counter::load_data();
+
+    (int op, int query_id) = ctx::body~load_op_and_query_id();
+
+    if op == op::transfer_notification {
+        slice ticket_wallet = calculate_user_jetton_wallet_address(my_address(), service_counter::ticket_minter, service_counter::wallet_code);
+        if equal_slices_bits(ctx::sender, ticket_wallet) {
+            int ticket_amount = ctx::body~load_coins();
+            slice from_address = ctx::body~load_msg_addr();
+            slice extra_data = ctx::body~load_maybe_ref().begin_parse();
+            ctx::body.end_parse();
+
+            op = extra_data~load_op();
+
+            if op == op::exchange {
+                slice account_owner = extra_data~load_msg_addr();
+                int item_id = extra_data~load_uint(ITEM_ID_SIZE);
+                cell payload = extra_data~load_maybe_ref();
+                extra_data.end_parse();
+
+                throw_unless(error::not_account, equal_slices_bits(from_address, get_account_address(my_address(), account_owner, service_counter::base_code)));
+                throw_unless(error::invalid_item_id, (item_id == COIN) | (item_id == FLAG));
+
+                int remaining_ticket = ticket_amount;
+                if item_id == COIN {
+                    remaining_ticket -= COIN_PRICE;
+                } else {
+                    remaining_ticket -= FLAG_PRICE;
+                }
+                if remaining_ticket < 0 {
+                    ;; exchange failed, return tickets
+                    cell msg = begin_cell()
+                        .store_op(op::transfer)
+                        .store_query_id(query_id)
+                        .store_coins(ticket_amount)
+                        .store_slice(from_address)
+                        .store_address_none()
+                        .store_uint(0, 1)
+                        .store_coins(0)
+                        .store_uint(0, 1)
+                        .end_cell();
+                    send_msg(ticket_wallet, TRANSFER_TICKET_GAS, msg, SEND_MODE_REGULAR);
+                    commit();
+                    throw(error::insufficient_ticket);
+                }
+                if item_id == COIN {
+                    cell master_msg = begin_cell()
+                        .store_op(op::internal_transfer)
+                        .store_query_id(query_id)
+                        .store_coins(1)
+                        .store_slice(service_counter::coin_minter)
+                        .store_address_none()
+                        .store_coins(0) ;; no need transfer notification
+                        .store_uint(0, 1)
+                        .end_cell();
+                    send_msg(service_counter::coin_minter, COIN_TOTAL_MINT_GAS + ctx::fwd_fee * 2, begin_cell()
+                        .store_op(op::mint)
+                        .store_query_id(query_id)
+                        .store_slice(account_owner)
+                        .store_coins(BUY_COIN_MINT_GAS + ctx::fwd_fee)
+                        .store_ref(master_msg)
+                        .end_cell(), SEND_MODE_REGULAR);
+                } else {
+                    service_counter::solver = from_address;
+                }
+                
+                slice response_address = account_owner;
+                cell forward_payload = null();
+                if payload.cell_null?() {
+                    forward_payload = begin_cell()
+                        .store_op(op::message)
+                        .store_slice("Successfully exchanged the item")
+                        .store_uint(item_id, ITEM_ID_SIZE)
+                        .end_cell();
+                } else {
+                    slice payload = payload.begin_parse();
+                    response_address = payload~load_msg_addr();
+                    forward_payload = payload~load_ref();
+                }
+                int remaining_value = ctx::value - (item_id == COIN ? ctx::fwd_fee * 2 + COIN_TOTAL_MINT_GAS : 0) - gas_consumption();
+                send_msg(response_address, remaining_value, forward_payload, SEND_MODE_REGULAR);
+                service_counter::save_data();
+            } else {
+                throw(error::wrong_op);
+            }
+        } else {
+            throw(error::invalid_caller);
+        }
+
+        return ();
+    }
+
+    if op == op::register {
+        throw_unless(error::not_enough_value, ctx::value >= ctx::fwd_fee + CONTRACT_INSTALL_GAS + gas_consumption());
+        int account_id = get_account_id(ctx::sender);
+        (cell base_state_init, slice account_address) = get_base_init_and_address(my_address(), account_id, service_counter::base_code);
+
+        slice coin_wallet_address = calculate_user_jetton_wallet_address(account_address, service_counter::coin_minter, service_counter::wallet_code);
+        slice ticket_wallet_address = calculate_user_jetton_wallet_address(account_address, service_counter::ticket_minter, service_counter::wallet_code);
+        cell account_init_data = pack_account_data(my_address(), ctx::sender, service_counter::coin_minter, coin_wallet_address, ticket_wallet_address);
+
+        cell install_body = pack_install_body(query_id, account_code(), account_init_data);
+        deploy_contract(account_address, 0, base_state_init, install_body, SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
+        return ();
+    }
+
+    if op == op::add_ticket {
+        throw_unless(error::not_admin, equal_slices_bits(ctx::sender, service_counter::admin));
+        int arcade_machine_game_type = ctx::body~load_uint(ARCADE_MACHINE_GAME_TYPE_SIZE);
+        int arcade_machine_id = ctx::body~load_uint(ARCADE_MACHINE_ID_SIZE);
+        int ticket_amount = ctx::body~load_coins();
+        int ton_amount = ctx::body~load_coins();
+        ctx::body.end_parse();
+
+        slice arcade_machine_addr = get_arcade_machine_address(my_address(), arcade_machine_game_type, arcade_machine_id, service_counter::base_code);
+        cell master_msg = begin_cell()
+            .store_op(op::internal_transfer)
+            .store_query_id(query_id)
+            .store_coins(ticket_amount)
+            .store_slice(my_address())
+            .store_address_none()
+            .store_coins(TICKET_NOTIFICATION_GAS)
+            .store_maybe_ref(begin_cell()
+                .store_op(op::add_ticket)
+                .end_cell())
+            .end_cell();
+        send_msg(service_counter::ticket_minter, 0, begin_cell()
+            .store_op(op::mint)
+            .store_query_id(query_id)
+            .store_slice(arcade_machine_addr)
+            .store_coins(ton_amount)
+            .store_ref(master_msg)
+            .end_cell(), SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE
+        );
+        return ();
+    }
+
+    if op == op::install_arcade_machine {
+        throw_unless(error::not_admin, equal_slices_bits(ctx::sender, service_counter::admin));
+        int arcade_machine_game_type = ctx::body~load_uint(ARCADE_MACHINE_GAME_TYPE_SIZE);
+        int arcade_machine_id = ctx::body~load_uint(ARCADE_MACHINE_ID_SIZE);
+        ctx::body.end_parse();
+        
+        int arcade_machine_id = get_arcade_machine_id(arcade_machine_game_type, arcade_machine_id);
+        (cell base_state_init, slice arcade_machine_address) = get_base_init_and_address(my_address(), arcade_machine_id, service_counter::base_code);
+
+        slice coin_wallet_address = calculate_user_jetton_wallet_address(arcade_machine_address, service_counter::coin_minter, service_counter::wallet_code);
+        slice ticket_wallet_address = calculate_user_jetton_wallet_address(arcade_machine_address, service_counter::ticket_minter, service_counter::wallet_code);
+        cell arcade_machine_init_data = pack_arcade_machine_data(my_address(), coin_wallet_address, ticket_wallet_address);
+
+        cell install_body = pack_install_body(query_id, arcade_machine_code(), arcade_machine_init_data);
+        deploy_contract(arcade_machine_address, 0, base_state_init, install_body, SEND_MODE_CARRY_ALL_REMAINING_MESSAGE_VALUE);
+        return ();
+    }
+
+    throw(error::wrong_op);
+}
+
+(slice) get_solver() method_id {
+    service_counter::load_data();
+    return service_counter::solver;
+}

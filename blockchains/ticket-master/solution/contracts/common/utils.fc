@@ -1,0 +1,142 @@
+#include "../imports/stdlib.fc";
+#include "opcode.fc";
+#include "constants.fc";
+
+int is_resolvable?(slice addr) inline {
+    (int wc, _) = parse_std_addr(addr);
+    return wc == BASECHAIN;
+}
+
+() send_msg(slice recipient, int amount, cell body, int mode) impure {
+    cell msg = begin_cell()
+        .store_uint(0x18, 6)
+        .store_slice(recipient)
+        .store_coins(amount)
+        .store_only_body_ref(body)
+        .end_cell();
+    send_raw_message(msg, mode);
+}
+
+() deploy_contract(slice address, int ton_amount, cell state_init, cell body, int msg_mode) impure {
+    var msg = begin_cell()
+        .store_uint(0x18, 6)
+        .store_slice(address)
+        .store_coins(ton_amount)
+        .store_statinit_ref_and_body_ref(state_init, body)
+        .end_cell();
+
+    send_raw_message(msg, msg_mode);
+}
+
+slice get_contract_addr(cell state_init) inline_ref {
+    return begin_cell()
+    .store_uint(2, 2) ;; addr_std$10
+    .store_uint(0, 1) ;; anycast nothing
+    .store_int(BASECHAIN, 8)
+    .store_uint(cell_hash(state_init), 256)
+    .end_cell()
+    .begin_parse();
+}
+
+cell get_base_init(slice deployer, int id, cell base_code) inline_ref {
+    return begin_cell()
+    .store_uint(0, 2)
+    .store_maybe_ref(base_code)
+    .store_maybe_ref(
+        begin_cell()
+            .store_slice(deployer)
+            .store_uint(id, ID_SIZE)
+        .end_cell()
+    )
+    .store_uint(0, 1)
+    .end_cell();
+}
+
+cell pack_install_body(int query_id, cell new_code, cell new_data) inline {
+    return begin_cell()
+        .store_op(op::install)
+        .store_query_id(query_id)
+        .store_ref(new_code)
+        .store_ref(new_data)
+    .end_cell();
+}
+
+(cell, slice) get_base_init_and_address(slice deployer, int id, cell base_code) inline_ref {
+    cell base_contract_init = get_base_init(deployer, id, base_code);
+    slice base_contract_address = get_contract_addr(base_contract_init);
+    return (base_contract_init, base_contract_address);
+}
+
+cell pack_jetton_wallet_data(int balance, slice owner_address, slice jetton_master_address, cell jetton_wallet_code) inline {
+   return  begin_cell()
+            .store_coins(balance)
+            .store_slice(owner_address)
+            .store_slice(jetton_master_address)
+            .store_ref(jetton_wallet_code)
+           .end_cell();
+}
+
+cell calculate_jetton_wallet_state_init(slice owner_address, slice jetton_master_address, cell jetton_wallet_code) inline {
+  return begin_cell()
+          .store_uint(0, 2)
+          .store_dict(jetton_wallet_code)
+          .store_dict(pack_jetton_wallet_data(0, owner_address, jetton_master_address, jetton_wallet_code))
+          .store_uint(0, 1)
+         .end_cell();
+}
+
+slice calculate_user_jetton_wallet_address(slice owner_address, slice jetton_master_address, cell jetton_wallet_code) inline {
+  return get_contract_addr(calculate_jetton_wallet_state_init(owner_address, jetton_master_address, jetton_wallet_code));
+}
+
+int get_account_id(slice owner) inline {
+    return begin_cell()
+        .store_uint(ACCOUNT_CONTRACT_TYPE, CONTRACT_TYPE_SIZE)
+        .store_slice(owner)
+        .end_cell().cell_hash();
+}
+
+int get_arcade_machine_id(int game_type, int machine_id) inline {
+    return begin_cell()
+        .store_uint(ARCADE_MACHINE_CONTRACT_TYPE, CONTRACT_TYPE_SIZE)
+        .store_uint(game_type, ARCADE_MACHINE_GAME_TYPE_SIZE)
+        .store_uint(machine_id, ARCADE_MACHINE_ID_SIZE)
+        .end_cell().cell_hash();
+}
+
+cell pack_account_data(slice service_counter, slice owner, slice coin_minter, slice coin_wallet, slice ticket_wallet) inline {
+    return begin_cell()
+        .store_slice(service_counter)
+        .store_slice(owner)
+        .store_slice(coin_minter)
+        .store_ref(
+            begin_cell()
+                .store_slice(coin_wallet)
+                .store_slice(ticket_wallet)
+            .end_cell()
+        )
+        .end_cell();
+}
+
+cell pack_arcade_machine_data(slice service_counter, slice coin_wallet, slice ticket_wallet) inline {
+    return begin_cell()
+        .store_slice(service_counter)
+        .store_ref(
+            begin_cell()
+                .store_slice(coin_wallet)
+                .store_slice(ticket_wallet)
+            .end_cell()
+        )
+        .store_coins(0)
+        .end_cell();
+}
+
+slice get_account_address(slice deployer, slice owner, cell base_code) inline {
+    (_, slice account_address) = get_base_init_and_address(deployer, get_account_id(owner), base_code);
+    return account_address;
+}
+
+slice get_arcade_machine_address(slice deployer, int game_type, int machine_id, cell base_code) inline {
+    (_, slice arcade_machine_address) = get_base_init_and_address(deployer, get_arcade_machine_id(game_type, machine_id), base_code);
+    return arcade_machine_address;
+}

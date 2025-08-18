@@ -1,0 +1,12 @@
+const error::wrong_op = 0xffff;
+
+const error::not_deployer = 1000;
+const error::not_owner = 1001;
+const error::not_admin = 1002;
+const error::not_account = 1003;
+const error::not_enough_value = 1004;
+const error::insufficient_balance = 1005;
+const error::invalid_target = 1006;
+const error::invalid_caller = 1007;
+const error::invalid_item_id = 1008;
+const error::insufficient_ticket = 1009;

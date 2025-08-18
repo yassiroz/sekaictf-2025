@@ -1,0 +1,8 @@
+services:
+  discrepancy:
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "40000:40000"

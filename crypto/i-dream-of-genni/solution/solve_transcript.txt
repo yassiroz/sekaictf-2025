@@ -1,0 +1,4 @@
+> python idog.py
+Enter an 8-digit multiplicand: 49228443
+Enter a 7-digit multiplier: 9773647
+Here is your flag: SEKAI{iSOgenni_in_mY_D1234M5;_iS_it_T00_s00n}

@@ -1,0 +1,178 @@
+#include "imports/stdlib.fc";
+#include "common/opcode.fc";
+#include "common/errors.fc";
+#include "common/constants.fc";
+#include "common/utils.fc";
+#include "bytecode/base_contract_code.fc";
+
+;;;;;;;;;; Account Storage ;;;;;;;;;;
+
+global slice account::service_counter;
+global slice account::owner;
+global slice account::coin_minter;
+global slice account::coin_wallet;
+global slice account::ticket_wallet;
+
+() account::load_data() impure inline_ref {
+    slice ds = get_data().begin_parse();
+    account::service_counter = ds~load_msg_addr();
+    account::owner = ds~load_msg_addr();
+    account::coin_minter = ds~load_msg_addr();
+    slice wallets = ds~load_ref().begin_parse();
+    account::coin_wallet = wallets~load_msg_addr();
+    account::ticket_wallet = wallets~load_msg_addr();
+    wallets.end_parse();
+    ds.end_parse();
+}
+
+() account::save_data() impure inline_ref {
+    begin_cell()
+        .store_slice(account::service_counter)
+        .store_slice(account::owner)
+        .store_slice(account::coin_minter)
+        .store_ref(
+            begin_cell()
+                .store_slice(account::coin_wallet)
+                .store_slice(account::ticket_wallet)
+            .end_cell()
+        )
+    .end_cell()
+    .set_data();
+}
+
+;;;;;;;;;; Account Contract ;;;;;;;;;;
+
+int gas_consumption() asm "15000000 PUSHINT"; ;; 0.015 TON
+
+() recv_internal(int my_balance, int ctx::value, cell in_msg_full, slice ctx::body) impure {
+    slice s = in_msg_full.begin_parse();
+    int flags = s~load_msg_flags();
+
+    if (is_bounced(flags)) {
+        return ();
+    }
+
+    (slice ctx::sender, int ctx::fwd_fee) = s~retrieve_ctx(BASECHAIN);
+
+    account::load_data();
+
+    (int op, int query_id) = ctx::body~load_op_and_query_id();
+
+    if op == op::transfer_notification {
+        return ();
+    }
+
+    if op == op::buy_coin {
+        int amount = ctx::body~load_coins();
+        ctx::body.end_parse();
+
+        int coin_total_value = ONE_TON * amount / 2; ;; 0.5 TON per coin
+        throw_unless(error::not_enough_value, ctx::value >= ctx::fwd_fee * 2 + COIN_TOTAL_MINT_GAS + coin_total_value + gas_consumption());
+
+        cell master_msg = begin_cell()
+            .store_op(op::internal_transfer)
+            .store_query_id(query_id)
+            .store_coins(amount)
+            .store_slice(account::coin_minter)
+            .store_address_none()
+            .store_coins(0) ;; no need transfer notification
+            .store_uint(0, 1)
+            .end_cell();
+        send_msg(account::coin_minter, ctx::fwd_fee + COIN_TOTAL_MINT_GAS + coin_total_value, begin_cell()
+            .store_op(op::mint)
+            .store_query_id(query_id)
+            .store_slice(account::owner)
+            .store_coins(ctx::fwd_fee + BUY_COIN_MINT_GAS)
+            .store_ref(master_msg)
+            .end_cell(), SEND_MODE_REGULAR);
+
+        return ();
+    }
+
+    if op == op::play {
+        throw_unless(error::not_owner, equal_slices_bits(ctx::sender, account::owner));
+        int arcade_machine_game_type = ctx::body~load_uint(ARCADE_MACHINE_GAME_TYPE_SIZE);
+        int arcade_machine_id = ctx::body~load_uint(ARCADE_MACHINE_ID_SIZE);
+        int use_coin_amount = ctx::body~load_coins();
+        ctx::body.end_parse();
+
+        slice arcade_machine_addr = get_arcade_machine_address(account::service_counter, arcade_machine_game_type, arcade_machine_id, base_contract_code());
+
+        throw_unless(error::not_enough_value, ctx::value >= ctx::fwd_fee * 4 + TRANSFER_COIN_TO_PLAY_GAS + gas_consumption());
+
+        cell msg = begin_cell()
+            .store_op(op::transfer)
+            .store_query_id(query_id)
+            .store_coins(use_coin_amount)
+            .store_slice(arcade_machine_addr)
+            .store_address_none()
+            .store_uint(0, 1)
+            .store_coins(PLAY_GAME_NOTIFICATION_GAS)
+            .store_maybe_ref(begin_cell()
+                .store_op(op::play)
+                .store_slice(account::owner)
+                .store_coins(TRANSFER_TICKET_GAS)
+                .store_coins(0)
+                .end_cell())
+            .end_cell();
+
+        send_msg(account::coin_wallet, TRANSFER_COIN_TO_PLAY_GAS + ctx::fwd_fee * 4, msg, SEND_MODE_REGULAR);
+        return ();
+    }
+
+    if op == op::exchange {
+        throw_unless(error::not_owner, equal_slices_bits(ctx::sender, account::owner));
+        int ticket_amount = ctx::body~load_coins();
+        int item_id = ctx::body~load_uint(ITEM_ID_SIZE);
+
+        throw_unless(error::not_enough_value, ctx::value >= ctx::fwd_fee * 3 + EXCHANGE_NOTIFICATION_GAS + COIN_TOTAL_MINT_GAS + gas_consumption());
+        
+        cell msg = begin_cell()
+            .store_op(op::transfer)
+            .store_query_id(query_id)
+            .store_coins(ticket_amount)
+            .store_slice(account::service_counter)
+            .store_address_none()
+            .store_uint(0, 1)
+            .store_coins(EXCHANGE_NOTIFICATION_GAS + COIN_TOTAL_MINT_GAS + ctx::fwd_fee * 2)
+            .store_maybe_ref(begin_cell()
+                .store_op(op::exchange)
+                .store_slice(account::owner)
+                .store_uint(item_id, ITEM_ID_SIZE)
+                .store_slice(ctx::body)
+                .end_cell())
+            .end_cell();
+
+        int remaining_value = ctx::value - gas_consumption();
+        send_msg(account::ticket_wallet, remaining_value, msg, SEND_MODE_REGULAR);
+        return ();
+    }
+
+    ;; you may want to transfer coins or tickets to other accounts
+    if op == op::external_call {
+        throw_unless(error::not_owner, equal_slices_bits(ctx::sender, account::owner));
+
+        slice recipient = ctx::body~load_msg_addr();
+        throw_if(error::invalid_target, equal_slices_bits(recipient, account::coin_minter));
+
+        cell msg = ctx::body~load_ref();
+        int ton_amount = ctx::body~load_coins();
+        ctx::body.end_parse();
+
+        slice msg_slice = msg.begin_parse();
+        if equal_slices_bits(recipient, account::ticket_wallet) {
+            (int op, int query_id) = msg_slice~load_op_and_query_id();
+            if op == op::transfer {
+                int amount = msg_slice~load_coins();
+                slice to_owner_address = msg_slice~load_msg_addr();
+                throw_if(error::invalid_target, equal_slices_bits(to_owner_address, account::service_counter));
+            }
+        }
+
+        throw_unless(error::not_enough_value, ctx::value >= ton_amount + gas_consumption());
+        send_msg(recipient, ton_amount, msg, SEND_MODE_REGULAR);
+        return ();
+    }
+
+    throw(error::wrong_op);
+}

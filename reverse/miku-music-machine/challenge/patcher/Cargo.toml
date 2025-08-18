@@ -1,0 +1,10 @@
+[package]
+name = "patcher"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.23", features = ["derive"] }
+pdb = "0.8.0"
+pelite = "0.10.0"
+rand = "0.8.5"

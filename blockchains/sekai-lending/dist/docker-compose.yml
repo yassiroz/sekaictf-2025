@@ -1,0 +1,11 @@
+services:
+  sekai-lending:
+    restart: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    ports:
+      - "31337:31337"
+    environment:
+      - FLAG=SEKAI{}

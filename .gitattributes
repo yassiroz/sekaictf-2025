@@ -1,0 +1,10 @@
+*.html linguist-vendored
+*.sh linguist-vendored
+*.sv linguist-vendored
+*.bat linguist-vendored
+*.css linguist-vendored
+*.s linguist-vendored
+*.hbs linguist-vendored
+*.svelte linguist-vendored
+Dockerfile linguist-vendored
+Makefile linguist-vendored

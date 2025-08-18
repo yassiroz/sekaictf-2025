@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: stray-cat-api
+  annotations:
+    # Prevent the service from being released to the public
+    release_time: "9999-12-31T23:59:59.999999Z"
+spec:
+  type: NodePort
+  selector:
+    category: blockchain
+    challenge: stray-cat-api
+  ports:
+  - name: https
+    port: 1337
+    targetPort: 1337
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: stray-cat-api-network-policy
+spec:
+  podSelector:
+    matchLabels:
+      category: blockchain
+      challenge: stray-cat-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # in order to receive API requests from the challenge frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          category: blockchain
+          challenge: stray-cat
+    ports:
+    - protocol: TCP
+      port: 1337
+  egress:
+  # in order to access the internet
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+  # in order to talk to the orchestrator and anvil-proxy
+  - to:
+    - podSelector:
+        matchLabels:
+          category: blockchain
+          challenge: infra
+    ports:
+    - protocol: TCP
+      port: 7283
+    - protocol: TCP
+      port: 8545
+  # in order to talk to the spawned blockchain instances
+  - to:
+    - podSelector:
+        matchLabels:
+          category: blockchain
+          challenge: stray-cat-instance
+    ports:
+    - protocol: TCP
+      port: 8545
+  # in order to resolve service names
+  - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+    ports:
+      - protocol: UDP
+        port: 53
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stray-cat-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      category: blockchain
+      challenge: stray-cat-api
+  template:
+    metadata:
+      labels:
+        category: blockchain
+        challenge: stray-cat-api
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      hostname: stray-cat-api
+      containers:
+      - name: stray-cat-api
+        image: us-central1-docker.pkg.dev/sekaictf-462901/sekaictf/blockchain_stray-cat:latest
+        imagePullPolicy: Always
+        env:
+        - name: CHALLENGE
+          value: stray-cat
+        - name: ORCHESTRATOR_HOST
+          value: http://orchestrator:7283
+        - name: PUBLIC_HOST
+          value: https://eth.chals.sekai.team
+        - name: LAUNCHER_MODE
+          value: api
+        - name: INSTANCE_LIFE_TIME
+          value: "900"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 250Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        ports:
+        - name: http
+          containerPort: 1337
+        livenessProbe:
+          tcpSocket:
+            port: 1337
+          initialDelaySeconds: 3
+          periodSeconds: 30

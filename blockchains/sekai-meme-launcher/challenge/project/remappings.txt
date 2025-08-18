@@ -1,0 +1,3 @@
+forge-std/=lib/forge-std/src/
+forge-ctf/=lib/forge-ctf/src/
+openzeppelin-contracts/=lib/forge-ctf/src/

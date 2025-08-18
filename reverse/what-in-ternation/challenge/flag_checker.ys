@@ -1,0 +1,4 @@
+read_verilog -sv flag_checker.sv;
+synth;
+abc -g AND,NAND,OR,NOR,XOR,XNOR,ANDNOT,ORNOT,AOI3,OAI3;
+write_json program.json;

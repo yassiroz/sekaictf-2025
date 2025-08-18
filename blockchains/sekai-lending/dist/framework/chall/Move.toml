@@ -1,0 +1,6 @@
+[package]
+name = "challenge"
+edition = "2024.beta"
+
+[addresses]
+challenge = "0x0"

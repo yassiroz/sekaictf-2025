@@ -1,0 +1,6 @@
+services:
+  speedpwn-2:
+    build:
+      context: .
+    ports:
+      - "1337:1337"

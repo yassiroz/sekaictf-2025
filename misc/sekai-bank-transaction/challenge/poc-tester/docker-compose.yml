@@ -1,0 +1,54 @@
+services:
+  device:
+    build:
+      context: device
+      dockerfile: Dockerfile
+    ports:
+      - "65000:65000"
+    privileged: true
+    environment:
+      MAX_MEMORY: ${MAX_MEMORY:-8192}
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "test -f /app/device_ready && test \"$(cat /app/device_ready)\" = \"1\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+    ports:
+      - "${WEB_PORT:-5000}:5000"
+    depends_on:
+      device:
+        condition: service_healthy
+    environment:
+      DEBUG: ${DEBUG:-false}
+      SECRET_KEY: ${SECRET_KEY}
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-100}
+      MAX_QUEUE_SIZE: ${MAX_QUEUE_SIZE:-50}
+      ADB_HOST: device
+      ADB_PORT: 5037
+    volumes:
+      - uploads:/app/uploads
+      - screenshots:/app/screenshots
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  uploads:
+  screenshots:

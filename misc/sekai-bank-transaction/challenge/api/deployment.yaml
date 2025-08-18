@@ -1,0 +1,138 @@
+# A ConfigMap needs to be created first to host the MongoDB init script.
+#    kubectl create configmap mongo-init-script --from-file=mongo-init.js=./docker/mongo-init.js
+apiVersion: v1
+kind: Service
+metadata:
+  name: sekaibank-api
+  annotations:
+    release_time: "2025-08-16T01:00:00Z"
+spec:
+  type: NodePort
+  selector:
+    category: misc
+    challenge: sekaibank-api
+  ports:
+  - name: https
+    port: 3000
+    targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sekaibank-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      category: misc
+      challenge: sekaibank-api
+  template:
+    metadata:
+      labels:
+        category: misc
+        challenge: sekaibank-api
+        egress: deny
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      hostname: sekaibank-api
+      volumes:
+      - name: mongo-init
+        configMap:
+          name: sekaibank-mongo-init
+
+      containers:
+      - name: mongo
+        image: mongo:7.0
+        imagePullPolicy: Always
+        volumeMounts:
+          - name: mongo-init
+            mountPath: /docker-entrypoint-initdb.d/mongo-init.js
+            subPath: mongo-init.js
+            readOnly: true
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: admin
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: QEjdtCLMLWmzRmjCCmwPgZAVWujwJmEv
+        - name: MONGO_INITDB_DATABASE
+          value: sekaibank
+        resources:
+          requests:
+            cpu: "1"
+            memory: 1Gi
+          limits:
+            cpu: "8"
+            memory: 8Gi
+        ports:
+        - name: tcp
+          containerPort: 27017
+        readinessProbe:
+          exec:
+            command:
+              ["mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
+
+      - name: api
+        image: us-central1-docker.pkg.dev/sekaictf-462901/sekaictf/misc_sekaibank-transaction-api:latest
+        imagePullPolicy: Always
+        env:
+        - name: NODE_ENV
+          value: production
+        - name: PORT
+          value: "3000"
+        - name: FLAG1
+          value: SEKAI{are-you-ready-for-the-real-challenge?}
+        - name: FLAG2
+          value: SEKAI{so-many-trouble-just-to-steal-a-million}
+        - name: MONGODB_URI
+          value: mongodb://admin:QEjdtCLMLWmzRmjCCmwPgZAVWujwJmEv@127.0.0.1:27017/sekaibank?authSource=admin
+        - name: JWT_SECRET
+          value: YhTjUd5X0twXuL3t
+        - name: JWT_REFRESH_SECRET
+          value: k4dzgGwoKpzXECnj
+        - name: JWT_EXPIRE
+          value: 3d
+        - name: JWT_REFRESH_EXPIRE
+          value: 7d
+        - name: PIN_MAX_ATTEMPTS
+          value: "3"
+        - name: PIN_LOCK_DURATION
+          value: "3600000"
+        - name: RATE_LIMIT_WINDOW
+          value: "900000"
+        - name: RATE_LIMIT_MAX_REQUESTS
+          value: "100"
+        - name: BCRYPT_ROUNDS
+          value: "12"
+        - name: LOG_LEVEL
+          value: info
+        resources:
+          requests:
+            cpu: 500m
+            memory: 500Mi
+          limits:
+            cpu: "4"
+            memory: 4Gi
+        ports:
+        - name: http
+          containerPort: 3000
+        readinessProbe:
+          exec:
+            command:
+              - node
+              - -e
+              - >
+                require('http')
+                .request({ host: 'localhost', port: 3000, path: '/api/health', timeout: 2000 },
+                  res => process.exit(res.statusCode === 200 ? 0 : 1)
+                )
+                .on('error', () => process.exit(1))
+                .end();
+          initialDelaySeconds: 30
+          periodSeconds: 40
+          timeoutSeconds: 10
+          failureThreshold: 3

@@ -1,0 +1,27 @@
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "E731", "S311", "PLW0603", "T201", "D211",
+    "D212", "D203", "COM812", "ISC001", "W391",
+    "D100", "D101", "D102", "D103", "D104",
+    "D107", "D419",  "FIX001", "FIX002",
+    "TD003", "S603", "ERA001", "PLR2004",
+    "SIM905", "T203", "S607", "SIM102",
+    "S101",
+]
+flake8-quotes.inline-quotes = "single"
+
+[tool.ruff.format]
+quote-style = "single"
+line-ending = "lf"
+
+[tool.ruff.lint.pylint]
+max-args = 6
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+combine-as-imports = false

@@ -1,0 +1,48 @@
+#pragma version 0.4.6;
+
+#include "imports/stdlib.fc";
+#include "common/opcode.fc";
+#include "common/errors.fc";
+#include "common/constants.fc";
+
+;;;;;;;;;; Base Storage ;;;;;;;;;;
+
+global slice base_contract::deployer;
+global int base_contract::id;
+
+() base_contract::load_data() impure inline_ref {
+    slice ds = get_data().begin_parse();
+    base_contract::deployer = ds~load_msg_addr();
+    base_contract::id = ds~load_uint(ID_SIZE);
+    ds.end_parse();
+}
+
+;;;;;;;;;; Base Contract ;;;;;;;;;;
+
+() recv_internal(int ctx::value, cell in_msg_full, slice ctx::body) impure {
+    slice s = in_msg_full.begin_parse();
+    int flags = s~load_msg_flags();
+
+    if (is_bounced(flags)) {
+        return ();
+    }
+
+    slice ctx::sender = s~load_msg_addr();
+
+    base_contract::load_data();
+
+    (int op, int query_id) = ctx::body~load_op_and_query_id();
+
+    if op == op::install {
+        throw_unless(error::not_deployer, equal_slices_bits(ctx::sender, base_contract::deployer));
+
+        cell new_code = ctx::body~load_ref();
+        cell new_data = ctx::body~load_ref();
+        
+        set_data(new_data);
+        set_code(new_code);
+        return ();
+    }
+
+    throw(error::wrong_op);
+}

@@ -1,0 +1,128 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: meme-launcher-api
+  annotations:
+    # Prevent the service from being released to the public
+    release_time: "9999-12-31T23:59:59.999999Z"
+spec:
+  type: NodePort
+  selector:
+    category: blockchain
+    challenge: meme-launcher-api
+  ports:
+  - name: https
+    port: 1337
+    targetPort: 1337
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: meme-launcher-api-network-policy
+spec:
+  podSelector:
+    matchLabels:
+      category: blockchain
+      challenge: meme-launcher-api
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # in order to receive API requests from the challenge frontend
+  - from:
+    - podSelector:
+        matchLabels:
+          category: blockchain
+          challenge: meme-launcher
+    ports:
+    - protocol: TCP
+      port: 1337
+  egress:
+  # in order to access the internet
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+  # in order to talk to the orchestrator and anvil-proxy
+  - to:
+    - podSelector:
+        matchLabels:
+          category: blockchain
+          challenge: infra
+    ports:
+    - protocol: TCP
+      port: 7283
+    - protocol: TCP
+      port: 8545
+  # in order to talk to the spawned blockchain instances
+  - to:
+    - podSelector:
+        matchLabels:
+          category: blockchain
+          challenge: meme-launcher-instance
+    ports:
+    - protocol: TCP
+      port: 8545
+  # in order to resolve service names
+  - to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+    ports:
+      - protocol: UDP
+        port: 53
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meme-launcher-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      category: blockchain
+      challenge: meme-launcher-api
+  template:
+    metadata:
+      labels:
+        category: blockchain
+        challenge: meme-launcher-api
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      hostname: meme-launcher-api
+      containers:
+      - name: meme-launcher-api
+        image: us-central1-docker.pkg.dev/sekaictf-462901/sekaictf/blockchain_meme-launcher:latest
+        imagePullPolicy: Always
+        env:
+        - name: CHALLENGE
+          value: meme-launcher
+        - name: ORCHESTRATOR_HOST
+          value: http://orchestrator:7283
+        - name: PUBLIC_HOST
+          value: https://eth.chals.sekai.team
+        - name: LAUNCHER_MODE
+          value: api
+        - name: INSTANCE_LIFE_TIME
+          value: "900"
+        - name: ETH_RPC_URL
+          value: "https://mainnet.infura.io/v3/9f2125ed84b44f42bf06dbdafa025124"
+        resources:
+          requests:
+            cpu: 250m
+            memory: 250Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        ports:
+        - name: http
+          containerPort: 1337
+        livenessProbe:
+          tcpSocket:
+            port: 1337
+          initialDelaySeconds: 3
+          periodSeconds: 30

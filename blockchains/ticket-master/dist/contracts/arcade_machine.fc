@@ -1,0 +1,152 @@
+#include "imports/stdlib.fc";
+#include "common/opcode.fc";
+#include "common/errors.fc";
+#include "common/utils.fc";
+#include "bytecode/base_contract_code.fc";
+
+;;;;;;;;;; Arcade Machine Storage ;;;;;;;;;;
+
+global slice arcade_machine::service_counter;
+global slice arcade_machine::coin_wallet;
+global slice arcade_machine::ticket_wallet;
+global int arcade_machine::ticket_balance;
+
+() arcade_machine::load_data() impure inline {
+    slice ds = get_data().begin_parse();
+    arcade_machine::service_counter = ds~load_msg_addr();
+    slice wallets = ds~load_ref().begin_parse();
+    arcade_machine::coin_wallet = wallets~load_msg_addr();
+    arcade_machine::ticket_wallet = wallets~load_msg_addr();
+    wallets.end_parse();
+    arcade_machine::ticket_balance = ds~load_coins();
+    ds.end_parse();
+}
+
+() arcade_machine::save_data() impure inline_ref {
+    begin_cell()
+        .store_slice(arcade_machine::service_counter)
+        .store_ref(
+            begin_cell()
+                .store_slice(arcade_machine::coin_wallet)
+                .store_slice(arcade_machine::ticket_wallet)
+            .end_cell()
+        )
+        .store_coins(arcade_machine::ticket_balance)
+    .end_cell()
+    .set_data();
+}
+
+;;;;;;;;;; Arcade Machine Contract ;;;;;;;;;;
+
+int gas_consumption() asm "10000000 PUSHINT"; ;; 0.001 TON
+
+() recv_internal(int my_balance, int ctx::value, cell in_msg_full, slice ctx::body) impure {
+    slice s = in_msg_full.begin_parse();
+    int flags = s~load_msg_flags();
+
+    if (is_bounced(flags)) {
+        return ();
+    }
+
+    (slice ctx::sender, int ctx::fwd_fee) = s~retrieve_ctx(BASECHAIN);
+
+    arcade_machine::load_data();
+
+    (int op, int query_id) = ctx::body~load_op_and_query_id();
+
+    if op == op::transfer_notification {
+        if equal_slices_bits(ctx::sender, arcade_machine::coin_wallet) {
+            int amount = ctx::body~load_coins();
+            slice from_address = ctx::body~load_msg_addr();
+            slice extra_data = ctx::body~load_maybe_ref().begin_parse();
+            ctx::body.end_parse();
+
+            op = extra_data~load_op();
+
+            if op == op::play {
+                slice account_owner = extra_data~load_msg_addr();
+                int ton_amount = extra_data~load_coins();
+                int forward_ton_amount = extra_data~load_coins();
+                extra_data.end_parse();
+
+                slice account_address = get_account_address(arcade_machine::service_counter, account_owner, base_contract_code());
+                throw_unless(error::not_account, equal_slices_bits(account_address, from_address));
+
+                ;; For simplicity, playing the game gives 100 tickets per coin.
+                int ticket_amount = amount * 100;
+                arcade_machine::ticket_balance -= ticket_amount;
+
+                throw_unless(error::not_enough_value, ctx::value >= ctx::fwd_fee * 2 + ton_amount * 3 / 2 + gas_consumption());
+                int remaining_value = ctx::value - gas_consumption();
+
+                if arcade_machine::ticket_balance < 0 {
+                    arcade_machine::ticket_balance += ticket_amount;
+                    send_msg(arcade_machine::coin_wallet, remaining_value, begin_cell()
+                        .store_op(op::transfer)
+                        .store_query_id(query_id)
+                        .store_coins(amount)
+                        .store_slice(from_address)
+                        .store_address_none()
+                        .store_uint(0, 1)
+                        .store_coins(forward_ton_amount)
+                        .store_uint(0, 1)
+                        .end_cell(), SEND_MODE_REGULAR);
+                    commit();
+                    throw(error::insufficient_ticket);
+                }
+
+                remaining_value -= (ton_amount + ctx::fwd_fee);
+
+                ;; transfer the tickets
+                send_msg(arcade_machine::ticket_wallet, ton_amount + ctx::fwd_fee, begin_cell()
+                    .store_op(op::transfer)
+                    .store_query_id(query_id)
+                    .store_coins(ticket_amount)
+                    .store_slice(from_address)
+                    .store_address_none()
+                    .store_uint(0, 1)
+                    .store_coins(forward_ton_amount)
+                    .store_uint(0, 1)
+                    .end_cell(), SEND_MODE_REGULAR);
+
+                ;; burn the coins
+                send_msg(arcade_machine::coin_wallet, remaining_value, begin_cell()
+                    .store_op(op::burn)
+                    .store_query_id(query_id)
+                    .store_coins(amount)
+                    .store_address_none()
+                    .end_cell(), SEND_MODE_REGULAR);
+
+                arcade_machine::save_data();
+            } else {
+                throw(error::wrong_op);
+            }
+            
+            return ();
+        }
+
+        if equal_slices_bits(ctx::sender, arcade_machine::ticket_wallet) {
+            int amount = ctx::body~load_coins();
+            slice from_address = ctx::body~load_msg_addr();
+            slice extra_data = ctx::body~load_maybe_ref().begin_parse();
+            ctx::body.end_parse();
+
+            op = extra_data~load_op();
+
+            if op == op::add_ticket {
+                extra_data.end_parse();
+                throw_unless(error::invalid_caller, equal_slices_bits(from_address, arcade_machine::service_counter));
+                arcade_machine::ticket_balance += amount;
+                arcade_machine::save_data();
+            } else {
+                throw(error::wrong_op);
+            }
+
+            return ();
+        }
+
+        throw(error::invalid_caller);
+    }
+
+    throw(error::wrong_op);
+}

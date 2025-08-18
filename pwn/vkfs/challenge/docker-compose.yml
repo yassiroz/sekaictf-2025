@@ -1,0 +1,13 @@
+services:
+  vkfs:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8080:22"
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+
